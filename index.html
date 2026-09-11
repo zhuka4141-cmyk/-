@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>STP 3D 模型涂鸦浏览器</title>
+  <style>
+    :root {
+      --bg: #0f151c;
+      --panel: rgba(20, 27, 35, 0.88);
+      --panel-solid: #141b23;
+      --border: rgba(255, 255, 255, 0.12);
+      --text: #e8eef4;
+      --muted: #93a3b4;
+      --accent: #ffb02e;
+      --accent-2: #3ea6ff;
+      --danger: #ff5c5c;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    #viewer {
+      position: fixed;
+      inset: 0;
+    }
+    #viewer canvas {
+      display: block;
+      touch-action: none;
+      outline: none;
+    }
+
+    #toolbar {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      z-index: 20;
+      pointer-events: none;
+    }
+    #toolbar .group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      pointer-events: auto;
+    }
+    button {
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      padding: 7px 11px;
+      border-radius: 9px;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.06s ease;
+      white-space: nowrap;
+    }
+    button:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.25); }
+    button:active { transform: translateY(1px); }
+    button.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #1a1206;
+      font-weight: 600;
+    }
+    button:disabled {
+      opacity: 0.38;
+      cursor: not-allowed;
+      transform: none;
+    }
+    label.control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    input[type="color"] {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"] {
+      width: 108px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    #brushSizeValue {
+      min-width: 22px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+
+    #status {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      z-index: 18;
+      max-width: 60vw;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      font-size: 12px;
+      color: var(--muted);
+      pointer-events: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #status.error {
+      color: var(--danger);
+      border-color: rgba(255, 92, 92, 0.5);
+    }
+    #hint {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      z-index: 18;
+      padding: 8px 13px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      font-size: 12px;
+      color: var(--muted);
+      pointer-events: none;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 15, 20, 0.8);
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
+    }
+    .overlay.hidden { display: none; }
+    .card {
+      width: min(460px, calc(100% - 32px));
+      padding: 30px 32px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--panel-solid);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      text-align: center;
+    }
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+    .card p {
+      margin: 0 0 20px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--muted);
+      word-break: break-word;
+    }
+    .card .actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .card .actions button {
+      padding: 9px 16px;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      margin: 0 auto 16px;
+      border: 3px solid rgba(255, 255, 255, 0.18);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 720px) {
+      #toolbar { top: 8px; left: 8px; right: 8px; gap: 6px; }
+      #toolbar .group { padding: 6px 8px; border-radius: 10px; }
+      button { padding: 7px 9px; font-size: 12px; }
+      input[type="range"] { width: 76px; }
+      #hint { display: none; }
+      #status { left: 10px; bottom: 10px; max-width: 80vw; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="viewer"></div>
+
+  <div id="toolbar">
+    <div class="group">
+      <button id="modeOrbit" class="active" type="button">🖐 旋转</button>
+      <button id="modePaint" type="button" disabled>🖌 绘画</button>
+    </div>
+
+    <div class="group">
+      <label class="control">颜色
+        <input type="color" id="brushColor" value="#ffcc00" />
+      </label>
+      <label class="control">大小
+        <input type="range" id="brushSize" min="1" max="100" value="22" disabled />
+      </label>
+      <span id="brushSizeValue">22</span>
+    </div>
+
+    <div class="group">
+      <button id="undoBtn" type="button" disabled>↩ 撤销</button>
+      <button id="resetBtn" type="button">🗑 重置</button>
+      <button id="saveBtn" type="button">💾 保存涂鸦</button>
+      <button id="openBtn" type="button">📂 打开涂鸦</button>
+    </div>
+
+    <div class="group">
+      <button id="loadModelBtn" type="button">📦 导入模型</button>
+    </div>
+  </div>
+
+  <div id="status">准备就绪</div>
+  <div id="hint">旋转模式：左键旋转 · 右键平移 · 滚轮缩放</div>
+
+  <input type="file" id="drawingFile" accept=".json,application/json" hidden />
+  <input type="file" id="modelFile" accept=".step,.stp,.stpz,.iges,.igs,.brep" hidden />
+
+  <div id="loading" class="overlay hidden">
+    <div class="card">
+      <div class="spinner"></div>
+      <div id="loadingText">加载中…</div>
+    </div>
+  </div>
+
+  <div id="error" class="overlay hidden">
+    <div class="card">
+      <h2>模型加载失败</h2>
+      <p id="errorText"></p>
+      <div class="actions">
+        <button id="errorImport" type="button">导入本地模型</button>
+        <button id="errorReload" type="button">重试</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+    import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+    // 部署到 GitHub Pages 时，模型文件应与本文件位于同一目录。
+    const MODEL_FILENAME = 'dragon dance Professional Class Version 1.step';
+
+    const STEP_PARAMS = {
+      linearUnit: 'millimeter',
+      linearDeflectionType: 'bounding_box_ratio',
+      linearDeflection: 0.001,
+      angularDeflection: 0.5
+    };
+
+    const STORAGE_KEY = 'stp-paint-drawing-v1';
+
+    const state = {
+      occt: null,
+      targetMesh: null,
+      strokes: [],
+      currentStroke: null,
+      modelRadius: 1,
+      modelCenter: new THREE.Vector3(),
+      mode: 'orbit',
+      brushColor: '#ffcc00',
+      brushDiameter: 0.05,
+      brushTexture: null,
+      grid: null,
+      cellSize: 0.05,
+      isDrawing: false,
+      lastPoint: null,
+      lastNormal: null
+    };
+
+    const viewerEl = document.getElementById('viewer');
+    const modeOrbitBtn = document.getElementById('modeOrbit');
+    const modePaintBtn = document.getElementById('modePaint');
+    const brushColorInput = document.getElementById('brushColor');
+    const brushSizeInput = document.getElementById('brushSize');
+    const brushSizeValue = document.getElementById('brushSizeValue');
+    const undoBtn = document.getElementById('undoBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const openBtn = document.getElementById('openBtn');
+    const loadModelBtn = document.getElementById('loadModelBtn');
+    const drawingFileInput = document.getElementById('drawingFile');
+    const modelFileInput = document.getElementById('modelFile');
+    const statusEl = document.getElementById('status');
+    const hintEl = document.getElementById('hint');
+    const loadingEl = document.getElementById('loading');
+    const loadingTextEl = document.getElementById('loadingText');
+    const errorEl = document.getElementById('error');
+    const errorTextEl = document.getElementById('errorText');
+    const errorImportBtn = document.getElementById('errorImport');
+    const errorReloadBtn = document.getElementById('errorReload');
+
+    // ---------- Three.js 基础场景 ----------
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    viewerEl.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f151c);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 10000);
+    camera.position.set(8, 6, 10);
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3c4b57, 1.4);
+    scene.add(hemiLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 3.2);
+    keyLight.position.set(0.8, 1.2, 0.9);
+    scene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0xbfd4ff, 1.4);
+    rimLight.position.set(-0.9, 0.3, -0.8);
+    scene.add(rimLight);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.rotateSpeed = 0.7;
+    controls.zoomSpeed = 1.0;
+    controls.panSpeed = 0.7;
+    controls.target.set(0, 0, 0);
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+
+    function animate() {
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    renderer.setAnimationLoop(animate);
+
+    window.addEventListener('resize', function () {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ---------- 笔刷贴图（白色软边圆点，颜色通过材质着色） ----------
+    function createBrushTexture() {
+      const size = 128;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const half = size / 2;
+      const gradient = ctx.createRadialGradient(half, half, 0, half, half, half);
+      gradient.addColorStop(0, 'rgba(255,255,255,1)');
+      gradient.addColorStop(0.35, 'rgba(255,255,255,1)');
+      gradient.addColorStop(0.65, 'rgba(255,255,255,0.5)');
+      gradient.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      return texture;
+    }
+    state.brushTexture = createBrushTexture();
+
+    // ---------- 工具函数 ----------
+    function nextFrame() {
+      return new Promise(function (resolve) {
+        requestAnimationFrame(function () { resolve(); });
+      });
+    }
+
+    function setStatus(message, isError) {
+      statusEl.textContent = message || '就绪';
+      statusEl.classList.toggle('error', !!isError);
+      clearTimeout(setStatus.timer);
+      setStatus.timer = setTimeout(function () {
+        statusEl.classList.remove('error');
+      }, 3200);
+    }
+
+    function showLoading(text) {
+      loadingTextEl.textContent = text || '加载中…';
+      loadingEl.classList.remove('hidden');
+    }
+
+    function hideLoading() {
+      loadingEl.classList.add('hidden');
+    }
+
+    function showError(text) {
+      errorTextEl.textContent = text || '未知错误';
+      errorEl.classList.remove('hidden');
+    }
+
+    function updateUndoButton() {
+      undoBtn.disabled = state.strokes.length === 0;
+    }
+
+    function setModelReady(ready) {
+      modePaintBtn.disabled = !ready;
+      brushSizeInput.disabled = !ready;
+      brushColorInput.disabled = !ready;
+      if (ready) updateUndoButton();
+    }
+
+    function updateBrushWorld() {
+      const value = Number(brushSizeInput.value) || 22;
+      state.brushDiameter = Math.max(
+        state.modelRadius * (value / 100) * 0.08,
+        state.modelRadius * 0.0008
+      );
+      brushSizeValue.textContent = String(value);
+    }
+
+    function loadScript(src) {
+      return new Promise(function (resolve, reject) {
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.onload = function () { resolve(); };
+        script.onerror = function () {
+          script.remove();
+          reject(new Error('脚本加载失败: ' + src));
+        };
+        document.head.appendChild(script);
+      });
+    }
+
+    const OCCT_URLS = [
+      'https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/occt-import-js.js',
+      'https://unpkg.com/occt-import-js@0.0.23/dist/occt-import-js.js'
+    ];
+
+    async function initOCCT() {
+      if (state.occt) return state.occt;
+      for (let i = 0; i < OCCT_URLS.length; i++) {
+        const url = OCCT_URLS[i];
+        try {
+          if (!window.occtimportjs) await loadScript(url);
+          if (window.occtimportjs) {
+            state.occt = await window.occtimportjs();
+            return state.occt;
+          }
+        } catch (err) {
+          console.warn('OpenCASCADE 引擎加载失败：' + url, err);
+        }
+      }
+      throw new Error('无法加载 OpenCASCADE（occt-import-js）引擎，请检查网络连接。');
+    }
+
+    // ---------- STEP 解析与模型构建 ----------
+    function normalizeColor(colorArray) {
+      if (!colorArray || !Array.isArray(colorArray) || colorArray.length < 3) {
+        return new THREE.Color(0xb9c8d3);
+      }
+      let r = Number(colorArray[0]);
+      let g = Number(colorArray[1]);
+      let b = Number(colorArray[2]);
+      if (Math.max(r, g, b) > 1) {
+        r = r / 255;
+        g = g / 255;
+        b = b / 255;
+      }
+      return new THREE.Color(r, g, b);
+    }
+
+    function buildMergedMesh(result) {
+      const geometries = [];
+      for (let i = 0; i < result.meshes.length; i++) {
+        const meshData = result.meshes[i];
+        if (!meshData.attributes || !meshData.attributes.position || !meshData.index) continue;
+        const posArray = meshData.attributes.position.array;
+        if (!posArray || posArray.length === 0) continue;
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(posArray, 3));
+
+        if (
+          meshData.attributes.normal &&
+          meshData.attributes.normal.array &&
+          meshData.attributes.normal.array.length === posArray.length
+        ) {
+          geometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.attributes.normal.array, 3));
+        } else {
+          geometry.computeVertexNormals();
+        }
+
+        const color = normalizeColor(meshData.color);
+        const vertexCount = posArray.length / 3;
+        const colors = new Float32Array(vertexCount * 3);
+        for (let v = 0; v < vertexCount; v++) {
+          colors[v * 3] = color.r;
+          colors[v * 3 + 1] = color.g;
+          colors[v * 3 + 2] = color.b;
+        }
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+        geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(meshData.index.array), 1));
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        geometries.push(geometry);
+      }
+
+      if (geometries.length === 0) throw new Error('模型中没有可渲染的网格。');
+
+      let mergedGeometry;
+      if (geometries.length > 1) {
+        mergedGeometry = mergeGeometries(geometries, false);
+        if (mergedGeometry) {
+          for (let i = 0; i < geometries.length; i++) geometries[i].dispose();
+        } else {
+          mergedGeometry = geometries[0];
+          for (let i = 1; i < geometries.length; i++) geometries[i].dispose();
+        }
+      } else {
+        mergedGeometry = geometries[0];
+      }
+
+      mergedGeometry.computeBoundingBox();
+      mergedGeometry.computeBoundingSphere();
+
+      const material = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.55,
+        metalness: 0.08,
+        side: THREE.DoubleSide
+      });
+
+      const mesh = new THREE.Mesh(mergedGeometry, material);
+      mesh.name = 'step-model';
+      mesh.updateMatrixWorld(true);
+      return mesh;
+    }
+
+    function fitCamera(mesh) {
+      const box = new THREE.Box3().setFromObject(mesh);
+      if (box.isEmpty()) return;
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const radius = Math.max(size.length() * 0.5, 0.001);
+
+      state.modelRadius = radius;
+      state.modelCenter.copy(center);
+
+      camera.near = Math.max(radius / 5000, 0.001);
+      camera.far = Math.max(radius * 200, 1000);
+      camera.updateProjectionMatrix();
+
+      const dist = radius * 2.0;
+      camera.position.set(center.x + dist * 0.9, center.y + dist * 0.65, center.z + dist);
+      controls.target.copy(center);
+      controls.minDistance = radius * 0.02;
+      controls.maxDistance = radius * 60;
+      controls.update();
+    }
+
+    // ---------- 表面贴花与空间索引 ----------
+    function buildPaintGrid(mesh) {
+      const geometry = mesh.geometry;
+      const positionAttr = geometry.attributes.position;
+      const indexAttr = geometry.index;
+      if (!positionAttr || !indexAttr) return;
+
+      const cellSize = Math.max(state.modelRadius * 0.02, 0.0001);
+      state.cellSize = cellSize;
+      const grid = new Map();
+
+      const vA = new THREE.Vector3();
+      const vB = new THREE.Vector3();
+      const vC = new THREE.Vector3();
+      const min = new THREE.Vector3();
+      const max = new THREE.Vector3();
+
+      for (let i = 0; i < indexAttr.count; i += 3) {
+        const a = indexAttr.getX(i);
+        const b = indexAttr.getX(i + 1);
+        const c = indexAttr.getX(i + 2);
+        vA.fromBufferAttribute(positionAttr, a);
+        vB.fromBufferAttribute(positionAttr, b);
+        vC.fromBufferAttribute(positionAttr, c);
+
+        min.set(
+          Math.min(vA.x, vB.x, vC.x),
+          Math.min(vA.y, vB.y, vC.y),
+          Math.min(vA.z, vB.z, vC.z)
+        );
+        max.set(
+          Math.max(vA.x, vB.x, vC.x),
+          Math.max(vA.y, vB.y, vC.y),
+          Math.max(vA.z, vB.z, vC.z)
+        );
+
+        const gx0 = Math.floor(min.x / cellSize);
+        const gy0 = Math.floor(min.y / cellSize);
+        const gz0 = Math.floor(min.z / cellSize);
+        const gx1 = Math.floor(max.x / cellSize);
+        const gy1 = Math.floor(max.y / cellSize);
+        const gz1 = Math.floor(max.z / cellSize);
+        const span = (gx1 - gx0 + 1) * (gy1 - gy0 + 1) * (gz1 - gz0 + 1);
+
+        if (span > 4096) {
+          const cx = Math.floor(((min.x + max.x) * 0.5) / cellSize);
+          const cy = Math.floor(((min.y + max.y) * 0.5) / cellSize);
+          const cz = Math.floor(((min.z + max.z) * 0.5) / cellSize);
+          const key = cx + ',' + cy + ',' + cz;
+          let list = grid.get(key);
+          if (!list) { list = []; grid.set(key, list); }
+          list.push(i / 3);
+          continue;
+        }
+
+        for (let gx = gx0; gx <= gx1; gx++) {
+          for (let gy = gy0; gy <= gy1; gy++) {
+            for (let gz = gz0; gz <= gz1; gz++) {
+              const key = gx + ',' + gy + ',' + gz;
+              let list = grid.get(key);
+              if (!list) { list = []; grid.set(key, list); }
+              list.push(i / 3);
+            }
+          }
+        }
+      }
+      state.grid = grid;
+    }
+
+    function queryCandidateTriangles(center, halfExtent) {
+      if (!state.grid) return new Set();
+      const cellSize = state.cellSize;
+      const gx0 = Math.floor((center.x - halfExtent) / cellSize);
+      const gy0 = Math.floor((center.y - halfExtent) / cellSize);
+      const gz0 = Math.floor((center.z - halfExtent) / cellSize);
+      const gx1 = Math.floor((center.x + halfExtent) / cellSize);
+      const gy1 = Math.floor((center.y + halfExtent) / cellSize);
+      const gz1 = Math.floor((center.z + halfExtent) / cellSize);
+
+      const triangleSet = new Set();
+      for (let gx = gx0; gx <= gx1; gx++) {
+        for (let gy = gy0; gy <= gy1; gy++) {
+          for (let gz = gz0; gz <= gz1; gz++) {
+            const list = state.grid.get(gx + ',' + gy + ',' + gz);
+            if (list) {
+              for (let i = 0; i < list.length; i++) triangleSet.add(list[i]);
+            }
+          }
+        }
+      }
+      return triangleSet;
+    }
+
+    function buildCandidateGeometry(triangleSet) {
+      const geometry = state.targetMesh.geometry;
+      const positionAttr = geometry.attributes.position;
+      const normalAttr = geometry.attributes.normal;
+      const indexAttr = geometry.index;
+
+      const vertexMap = new Map();
+      const positions = [];
+      const normals = [];
+      const indices = [];
+
+      triangleSet.forEach(function (triangleIndex) {
+        const newIndices = [];
+        for (let k = 0; k < 3; k++) {
+          const originalIndex = indexAttr.getX(triangleIndex * 3 + k);
+          let newIndex = vertexMap.get(originalIndex);
+          if (newIndex === undefined) {
+            newIndex = positions.length / 3;
+            vertexMap.set(originalIndex, newIndex);
+            positions.push(
+              positionAttr.getX(originalIndex),
+              positionAttr.getY(originalIndex),
+              positionAttr.getZ(originalIndex)
+            );
+            if (normalAttr) {
+              normals.push(
+                normalAttr.getX(originalIndex),
+                normalAttr.getY(originalIndex),
+                normalAttr.getZ(originalIndex)
+              );
+            }
+          }
+          newIndices.push(newIndex);
+        }
+        indices.push(newIndices[0], newIndices[1], newIndices[2]);
+      });
+
+      if (positions.length === 0) return null;
+
+      const candidateGeometry = new THREE.BufferGeometry();
+      candidateGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      if (normals.length === positions.length) {
+        candidateGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+      }
+      candidateGeometry.setIndex(indices);
+      return candidateGeometry;
+    }
+
+    function normalToOrientation(normal) {
+      const n = normal.clone().normalize();
+      if (n.lengthSq() < 0.5) n.set(0, 0, 1);
+      const up = Math.abs(n.z) < 0.99 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+      const matrix = new THREE.Matrix4().lookAt(n, new THREE.Vector3(0, 0, 0), up);
+      const euler = new THREE.Euler();
+      euler.setFromRotationMatrix(matrix);
+      return euler;
+    }
+
+    function createDecal(point, normal, colorHex, diameter) {
+      if (!state.targetMesh || !state.grid) return null;
+
+      const depth = Math.max(diameter * 0.6, state.modelRadius * 0.004);
+      const size = new THREE.Vector3(diameter, diameter, depth);
+      const halfExtent = diameter * 0.6;
+
+      const triangleSet = queryCandidateTriangles(point, halfExtent);
+      if (!triangleSet || triangleSet.size === 0) return null;
+
+      const candidateGeometry = buildCandidateGeometry(triangleSet);
+      if (!candidateGeometry) return null;
+
+      const tempMesh = new THREE.Mesh(candidateGeometry, state.targetMesh.material);
+      tempMesh.matrixWorld.identity();
+
+      let decalGeometry;
+      try {
+        decalGeometry = new DecalGeometry(tempMesh, point, normalToOrientation(normal), size);
+      } catch (err) {
+        candidateGeometry.dispose();
+        return null;
+      }
+      candidateGeometry.dispose();
+
+      if (!decalGeometry.attributes.position || decalGeometry.attributes.position.count === 0) {
+        decalGeometry.dispose();
+        return null;
+      }
+
+      const material = new THREE.MeshBasicMaterial({
+        map: state.brushTexture,
+        color: colorHex,
+        transparent: true,
+        depthTest: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+        side: THREE.DoubleSide,
+        toneMapped: true
+      });
+
+      const decalMesh = new THREE.Mesh(decalGeometry, material);
+      decalMesh.renderOrder = 20;
+      decalMesh.userData.isDecal = true;
+      scene.add(decalMesh);
+      return decalMesh;
+    }
+
+    // ---------- 笔画与历史 ----------
+    function removeStroke(stroke) {
+      if (!stroke) return;
+      for (let i = 0; i < stroke.meshes.length; i++) {
+        const mesh = stroke.meshes[i];
+        scene.remove(mesh);
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) mesh.material.dispose();
+      }
+      stroke.meshes.length = 0;
+    }
+
+    function clearAllStrokes() {
+      if (state.currentStroke) {
+        removeStroke(state.currentStroke);
+        state.currentStroke = null;
+      }
+      for (let i = 0; i < state.strokes.length; i++) {
+        removeStroke(state.strokes[i]);
+      }
+      state.strokes = [];
+      updateUndoButton();
+    }
+
+    function undo() {
+      if (state.strokes.length === 0) {
+        setStatus('没有可撤销的操作');
+        return;
+      }
+      const stroke = state.strokes.pop();
+      removeStroke(stroke);
+      saveState();
+      updateUndoButton();
+      setStatus('已撤销上一笔');
+    }
+
+    function serializeState() {
+      return {
+        version: 1,
+        model: MODEL_FILENAME,
+        exportedAt: new Date().toISOString(),
+        strokes: state.strokes.map(function (stroke) {
+          return {
+            color: stroke.color,
+            size: stroke.size,
+            stamps: stroke.stamps.map(function (stamp) {
+              return { p: stamp.p, n: stamp.n, s: stamp.s };
+            })
+          };
+        })
+      };
+    }
+
+    function restoreStrokes(data) {
+      if (!data || !Array.isArray(data.strokes)) throw new Error('文件格式不正确，缺少 strokes 数组。');
+      if (data.model && data.model !== MODEL_FILENAME) {
+        setStatus('提示：涂鸦来自不同模型，位置可能偏移', true);
+      }
+
+      clearAllStrokes();
+
+      for (let i = 0; i < data.strokes.length; i++) {
+        const stroke = data.strokes[i];
+        if (!stroke || !Array.isArray(stroke.stamps) || stroke.stamps.length === 0) continue;
+
+        state.currentStroke = {
+          color: stroke.color || '#ffcc00',
+          size: Number(stroke.size) || 0.05,
+          meshes: [],
+          stamps: []
+        };
+
+        for (let j = 0; j < stroke.stamps.length; j++) {
+          const stamp = stroke.stamps[j];
+          if (!stamp || !Array.isArray(stamp.p) || !Array.isArray(stamp.n)) continue;
+          const p = new THREE.Vector3(Number(stamp.p[0]), Number(stamp.p[1]), Number(stamp.p[2]));
+          const n = new THREE.Vector3(Number(stamp.n[0]), Number(stamp.n[1]), Number(stamp.n[2]));
+          const s = Number(stamp.s) || state.currentStroke.size;
+          const decal = createDecal(p, n, state.currentStroke.color, s);
+          if (decal) {
+            state.currentStroke.meshes.push(decal);
+            state.currentStroke.stamps.push({ p: stamp.p, n: stamp.n, s: s });
+          }
+        }
+
+        if (state.currentStroke.stamps.length > 0) {
+          state.strokes.push(state.currentStroke);
+        }
+      }
+      state.currentStroke = null;
+      updateUndoButton();
+    }
+
+    // ---------- 持久化（localStorage + IndexedDB 双保险） ----------
+    function idbOpen() {
+      return new Promise(function (resolve, reject) {
+        if (!window.indexedDB) { reject(new Error('IndexedDB 不可用')); return; }
+        const request = indexedDB.open('stp-paint-db', 1);
+        request.onupgradeneeded = function () {
+          const db = request.result;
+          if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        };
+        request.onsuccess = function () { resolve(request.result); };
+        request.onerror = function () { reject(request.error); };
+      });
+    }
+
+    function idbSet(key, value) {
+      return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          const tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(value, key);
+          tx.oncomplete = function () { db.close(); resolve(); };
+          tx.onerror = function () { db.close(); reject(tx.error); };
+        });
+      });
+    }
+
+    function idbGet(key) {
+      return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          const tx = db.transaction('kv', 'readonly');
+          const req = tx.objectStore('kv').get(key);
+          req.onsuccess = function () { db.close(); resolve(req.result); };
+          req.onerror = function () { db.close(); reject(req.error); };
+        });
+      });
+    }
+
+    function idbDel(key) {
+      return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          const tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').delete(key);
+          tx.oncomplete = function () { db.close(); resolve(); };
+          tx.onerror = function () { db.close(); reject(tx.error); };
+        });
+      });
+    }
+
+    async function saveToStorage(data) {
+      const json = JSON.stringify(data);
+      try { localStorage.setItem(STORAGE_KEY, json); } catch (err) { console.warn('localStorage 保存失败', err); }
+      try { await idbSet(STORAGE_KEY, data); } catch (err) { console.warn('IndexedDB 保存失败', err); }
+    }
+
+    async function loadFromStorage() {
+      try {
+        const data = await idbGet(STORAGE_KEY);
+        if (data) return data;
+      } catch (err) { console.warn('IndexedDB 读取失败', err); }
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (err) { console.warn('localStorage 读取失败', err); }
+      return null;
+    }
+
+    async function clearStorage() {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (err) {}
+      try { await idbDel(STORAGE_KEY); } catch (err) {}
+    }
+
+    function saveState() {
+      try { saveToStorage(serializeState()); } catch (err) { console.warn('自动保存失败', err); }
+    }
+
+    // ---------- 画笔交互 ----------
+    function raycastSurface(event) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObject(state.targetMesh, false);
+      return hits.length ? hits[0] : null;
+    }
+
+    function addStamp(point, normal) {
+      if (!state.currentStroke) return;
+      const decal = createDecal(point, normal, state.currentStroke.color, state.currentStroke.size);
+      if (decal) {
+        state.currentStroke.meshes.push(decal);
+        state.currentStroke.stamps.push({
+          p: point.toArray(),
+          n: normal.toArray(),
+          s: state.currentStroke.size
+        });
+      }
+    }
+
+    function paintSegment(from, fromNormal, to, toNormal) {
+      const dist = from.distanceTo(to);
+      const spacing = Math.max(state.brushDiameter * 0.25, state.modelRadius * 0.0008);
+      if (dist < spacing * 0.7) return;
+      const steps = Math.max(1, Math.ceil(dist / spacing));
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const p = from.clone().lerp(to, t);
+        const n = fromNormal.clone().lerp(toNormal, t).normalize();
+        addStamp(p, n);
+      }
+    }
+
+    function onPointerDown(event) {
+      if (state.mode !== 'paint' || !state.targetMesh) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      const hit = raycastSurface(event);
+      if (!hit) return;
+
+      event.preventDefault();
+      state.isDrawing = true;
+      try { renderer.domElement.setPointerCapture(event.pointerId); } catch (err) {}
+
+      const normal = hit.face.normal ? hit.face.normal.clone() : new THREE.Vector3(0, 0, 1);
+      normal.transformDirection(state.targetMesh.matrixWorld).normalize();
+
+      state.lastPoint = hit.point.clone();
+      state.lastNormal = normal.clone();
+      state.currentStroke = {
+        color: state.brushColor,
+        size: state.brushDiameter,
+        meshes: [],
+        stamps: []
+      };
+      addStamp(state.lastPoint, state.lastNormal);
+    }
+
+    function onPointerMove(event) {
+      if (!state.isDrawing || !state.targetMesh) return;
+      const hit = raycastSurface(event);
+      if (!hit) return;
+      const normal = hit.face.normal ? hit.face.normal.clone() : new THREE.Vector3(0, 0, 1);
+      normal.transformDirection(state.targetMesh.matrixWorld).normalize();
+      paintSegment(state.lastPoint, state.lastNormal, hit.point, normal);
+      state.lastPoint.copy(hit.point);
+      state.lastNormal.copy(normal);
+    }
+
+    function endStroke() {
+      if (!state.isDrawing) return;
+      state.isDrawing = false;
+      if (state.currentStroke && state.currentStroke.stamps.length > 0) {
+        state.strokes.push(state.currentStroke);
+        state.currentStroke = null;
+        saveState();
+        updateUndoButton();
+        setStatus('笔画已保存');
+      } else if (state.currentStroke) {
+        removeStroke(state.currentStroke);
+        state.currentStroke = null;
+      }
+      state.lastPoint = null;
+      state.lastNormal = null;
+    }
+
+    function onPointerUp() { endStroke(); }
+    function onPointerCancel() { endStroke(); }
+    function onPointerLeave() { endStroke(); }
+
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
+    renderer.domElement.addEventListener('pointercancel', onPointerCancel);
+    renderer.domElement.addEventListener('pointerleave', onPointerLeave);
+
+    function setMode(mode) {
+      state.mode = mode;
+      controls.enabled = (mode === 'orbit');
+      modeOrbitBtn.classList.toggle('active', mode === 'orbit');
+      modePaintBtn.classList.toggle('active', mode === 'paint');
+      renderer.domElement.style.cursor = mode === 'paint' ? 'crosshair' : 'grab';
+      hintEl.textContent = mode === 'paint'
+        ? '画笔模式：在模型表面按住并拖动绘画'
+        : '旋转模式：左键旋转 · 右键平移 · 滚轮缩放';
+    }
+
+    // ---------- 模型加载 ----------
+    function clearModel() {
+      clearAllStrokes();
+      if (state.targetMesh) {
+        scene.remove(state.targetMesh);
+        if (state.targetMesh.geometry) state.targetMesh.geometry.dispose();
+        if (state.targetMesh.material) state.targetMesh.material.dispose();
+        state.targetMesh = null;
+      }
+      state.grid = null;
+      state.modelRadius = 1;
+    }
+
+    async function loadModelFromBuffer(buffer) {
+      showLoading('正在初始化 OpenCASCADE 引擎…');
+      await nextFrame();
+      const occt = await initOCCT();
+
+      showLoading('正在解析 STEP 文件，可能需要几秒…');
+      await nextFrame();
+      const result = occt.ReadStepFile(new Uint8Array(buffer), STEP_PARAMS);
+      if (!result || result.success !== true) throw new Error('STEP 解析失败，文件可能已损坏或格式不受支持。');
+      if (!result.meshes || result.meshes.length === 0) throw new Error('模型中没有可渲染的网格。');
+
+      clearModel();
+
+      showLoading('正在构建渲染网格…');
+      await nextFrame();
+      const mesh = buildMergedMesh(result);
+      scene.add(mesh);
+      state.targetMesh = mesh;
+
+      fitCamera(mesh);
+
+      showLoading('正在建立表面绘制索引…');
+      await nextFrame();
+      buildPaintGrid(mesh);
+
+      updateBrushWorld();
+      setModelReady(true);
+      hideLoading();
+      setStatus('模型加载完成，可切换到“绘画”模式开始涂鸦');
+    }
+
+    async function loadModelFile(url) {
+      showLoading('正在下载模型…');
+      let response;
+      try {
+        response = await fetch(url);
+      } catch (err) {
+        throw new Error('无法访问模型文件（' + err.message + '）。若通过 file:// 打开，请点击“导入模型”。');
+      }
+      if (!response.ok) throw new Error('模型文件请求失败（HTTP ' + response.status + '）。');
+      const buffer = await response.arrayBuffer();
+      await loadModelFromBuffer(buffer);
+    }
+
+    // ---------- 导入 / 导出 ----------
+    function exportDrawing() {
+      const data = serializeState();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'dragon-painting.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+      setStatus('涂鸦已导出为 JSON 文件');
+    }
+
+    // ---------- 事件绑定 ----------
+    modeOrbitBtn.addEventListener('click', function () { setMode('orbit'); });
+    modePaintBtn.addEventListener('click', function () { setMode('paint'); });
+    brushColorInput.addEventListener('input', function () {
+      state.brushColor = brushColorInput.value;
+    });
+    brushSizeInput.addEventListener('input', updateBrushWorld);
+
+    undoBtn.addEventListener('click', undo);
+
+    resetBtn.addEventListener('click', function () {
+      if (!window.confirm('确定要清除所有涂鸦并删除本地缓存吗？')) return;
+      clearAllStrokes();
+      clearStorage();
+      updateUndoButton();
+      setStatus('已重置，模型恢复初始状态');
+    });
+
+    saveBtn.addEventListener('click', exportDrawing);
+
+    openBtn.addEventListener('click', function () {
+      drawingFileInput.click();
+    });
+
+    loadModelBtn.addEventListener('click', function () {
+      modelFileInput.click();
+    });
+
+    errorImportBtn.addEventListener('click', function () {
+      errorEl.classList.add('hidden');
+      modelFileInput.click();
+    });
+
+    errorReloadBtn.addEventListener('click', function () {
+      location.reload();
+    });
+
+    drawingFileInput.addEventListener('change', async function () {
+      const file = drawingFileInput.files && drawingFileInput.files[0];
+      if (!file) return;
+      if (!state.targetMesh) {
+        setStatus('请先加载模型，再导入涂鸦', true);
+        drawingFileInput.value = '';
+        return;
+      }
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        restoreStrokes(data);
+        saveState();
+        setStatus('涂鸦已导入');
+      } catch (err) {
+        setStatus('涂鸦导入失败：' + err.message, true);
+      } finally {
+        drawingFileInput.value = '';
+      }
+    });
+
+    modelFileInput.addEventListener('change', async function () {
+      const file = modelFileInput.files && modelFileInput.files[0];
+      if (!file) return;
+      try {
+        const buffer = await file.arrayBuffer();
+        await loadModelFromBuffer(buffer);
+      } catch (err) {
+        hideLoading();
+        setStatus('模型导入失败：' + err.message, true);
+      } finally {
+        modelFileInput.value = '';
+      }
+    });
+
+    // 关闭页面前同步一次 localStorage，避免异步 IndexedDB 尚未写入。
+    window.addEventListener('beforeunload', function () {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
+      } catch (err) {}
+    });
+
+    // ---------- 启动 ----------
+    setMode('orbit');
+    setModelReady(false);
+    updateBrushWorld();
+
+    async function start() {
+      try {
+        await loadModelFile(encodeURI(MODEL_FILENAME));
+        const saved = await loadFromStorage();
+        if (saved && Array.isArray(saved.strokes)) {
+          try {
+            restoreStrokes(saved);
+            setStatus('已恢复上次保存的涂鸦');
+          } catch (err) {
+            setStatus('恢复涂鸦失败：' + err.message, true);
+          }
+        } else {
+          setStatus('模型已加载，可开始绘画');
+        }
+      } catch (err) {
+        hideLoading();
+        showError('自动加载模型失败：' + err.message + '。请点击“导入模型”选择本地 STEP 文件。');
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>
