@@ -104,7 +104,15 @@ function nearbyGeometry(part, point, size) {
   return geometry;
 }
 
-export function createDecal(part, point, normal, color, diameter, texture) {
+export function createDecal(
+  part,
+  point,
+  normal,
+  color,
+  diameter,
+  texture,
+  options = {},
+) {
   const candidates = nearbyGeometry(part, point, diameter);
   const tempMesh = new THREE.Mesh(candidates, part.material);
   const orientation = new THREE.Euler().setFromQuaternion(
@@ -128,10 +136,15 @@ export function createDecal(part, point, normal, color, diameter, texture) {
     geometry.dispose();
     return null;
   }
+  const soft = options.soft !== false;
+  const opacity = Number.isFinite(options.opacity)
+    ? Math.min(1, Math.max(0.05, options.opacity))
+    : 1;
   const material = new THREE.MeshBasicMaterial({
     color,
-    map: texture,
-    transparent: true,
+    map: soft ? texture : null,
+    transparent: soft || opacity < 1,
+    opacity,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -4,
@@ -155,19 +168,22 @@ export function removeStroke(stroke) {
 
 export function serializeDrawing(modelKey, modelName, strokes) {
   return {
-    version: 2,
+    version: 3,
     modelKey,
     modelName,
     savedAt: Date.now(),
     strokes: strokes.map((stroke) => ({
       color: stroke.color,
+      opacity: stroke.opacity ?? 1,
+      tool: stroke.tool ?? "brush",
+      soft: stroke.soft !== false,
       stamps: stroke.stamps,
     })),
   };
 }
 
 export function validateDrawing(data, modelKey, parts) {
-  if (data?.version !== 2)
+  if (data?.version !== 2 && data?.version !== 3)
     throw new Error("涂鸦版本不兼容，请使用本版本导出的文件。");
   if (data.modelKey !== modelKey)
     throw new Error("涂鸦属于其他车型，无法应用到当前模型。");
@@ -182,7 +198,15 @@ export function validateDrawing(data, modelKey, parts) {
       (n) => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 1e7,
     );
   for (const stroke of data.strokes) {
-    if (!/^#[0-9a-f]{6}$/i.test(stroke?.color) || !Array.isArray(stroke.stamps))
+    if (
+      !/^#[0-9a-f]{6}$/i.test(stroke?.color) ||
+      !Array.isArray(stroke.stamps) ||
+      !Number.isFinite(stroke.opacity ?? 1) ||
+      stroke.opacity < 0 ||
+      stroke.opacity > 1 ||
+      !["brush", "eraser"].includes(stroke.tool ?? "brush") ||
+      typeof (stroke.soft ?? true) !== "boolean"
+    )
       throw new Error("涂鸦颜色或笔画格式不正确。");
     total += stroke.stamps.length;
     if (total > MAX_STAMPS)
@@ -190,6 +214,17 @@ export function validateDrawing(data, modelKey, parts) {
     for (const stamp of stroke.stamps) {
       if (!stamp || !ids.has(stamp.part))
         throw new Error("涂鸦引用了不存在的零件。");
+      if (
+        !Number.isFinite(stamp.opacity ?? 1) ||
+        stamp.opacity < 0 ||
+        stamp.opacity > 1 ||
+        !Number.isFinite(stamp.pressure ?? 0.65) ||
+        stamp.pressure < 0 ||
+        stamp.pressure > 1 ||
+        !["brush", "eraser"].includes(stamp.tool ?? "brush") ||
+        typeof (stamp.soft ?? true) !== "boolean"
+      )
+        throw new Error("涂鸦笔刷元数据不正确。");
       if (
         !vector(stamp.p) ||
         !vector(stamp.n) ||
@@ -209,7 +244,14 @@ export function restoreDrawing(data, modelKey, parts, texture) {
   const strokes = [];
   try {
     for (const saved of data.strokes) {
-      const stroke = { color: saved.color, stamps: [], meshes: [] };
+      const stroke = {
+        color: saved.color,
+        opacity: saved.opacity ?? 1,
+        tool: saved.tool ?? "brush",
+        soft: saved.soft !== false,
+        stamps: [],
+        meshes: [],
+      };
       strokes.push(stroke);
       for (const stamp of saved.stamps) {
         const decal = createDecal(
@@ -219,6 +261,10 @@ export function restoreDrawing(data, modelKey, parts, texture) {
           saved.color,
           stamp.s,
           texture,
+          {
+            opacity: stamp.opacity ?? stroke.opacity,
+            soft: stamp.soft ?? stroke.soft,
+          },
         );
         if (decal) {
           stroke.meshes.push(decal);

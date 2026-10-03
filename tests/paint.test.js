@@ -90,3 +90,62 @@ test("exported drawing restores on its original part, and undo removes only that
   removeStroke(strokes[0]);
   assert.equal(part.children.length, 0);
 });
+
+test("brush metadata survives export and controls decal opacity", () => {
+  const part = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshBasicMaterial(),
+  );
+  part.userData.id = "part-0";
+  const saved = serializeDrawing("model-a", "a.step", [
+    {
+      color: "#ffcc00",
+      opacity: 0.35,
+      tool: "brush",
+      soft: false,
+      stamps: [
+        {
+          part: "part-0",
+          p: [0, 0, 1],
+          n: [0, 0, 1],
+          s: 0.5,
+          opacity: 0.35,
+          tool: "brush",
+          soft: false,
+        },
+      ],
+    },
+  ]);
+  assert.equal(saved.version, 3);
+  const strokes = restoreDrawing(saved, "model-a", [part], null);
+  assert.equal(strokes[0].stamps[0].opacity, 0.35);
+  assert.equal(strokes[0].meshes[0].material.opacity, 0.35);
+  assert.equal(strokes[0].meshes[0].material.map, null);
+  removeStroke(strokes[0]);
+});
+
+test("drawing import rejects invalid pressure and opacity metadata", () => {
+  const parts = [{ userData: { id: "part-0" } }];
+  const data = {
+    version: 3,
+    modelKey: "m",
+    strokes: [
+      { color: "#fff000", opacity: 2, tool: "brush", soft: true, stamps: [] },
+    ],
+  };
+  assert.throws(() => validateDrawing(data, "m", parts), /颜色/);
+  data.strokes[0].opacity = 0.5;
+  data.strokes[0].stamps = [
+    {
+      part: "part-0",
+      p: [0, 0, 0],
+      n: [0, 0, 1],
+      s: 1,
+      pressure: 3,
+      opacity: 0.5,
+      tool: "brush",
+      soft: true,
+    },
+  ];
+  assert.throws(() => validateDrawing(data, "m", parts), /元数据/);
+});

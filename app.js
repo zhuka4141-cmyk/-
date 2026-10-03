@@ -19,6 +19,7 @@ import {
   restoreDrawing,
 } from "./paint.js";
 import { classifyPointerInput } from "./interaction.js";
+import { normalizePressure, coalescedPointerEvents } from "./interaction.js";
 
 const $ = (id) => document.getElementById(id);
 const viewer = $("viewer");
@@ -29,12 +30,17 @@ const state = {
   mode: "auto",
   selected: new Set(),
   strokes: [],
+  redo: [],
+  history: [],
   current: null,
   last: null,
   pointerId: null,
   busy: false,
   moving: false,
   stamps: 0,
+  tool: "brush",
+  softBrush: true,
+  pressureEnabled: true,
   drawingReady: false,
 };
 const renderer = new THREE.WebGLRenderer({
@@ -99,6 +105,7 @@ function updateUI() {
   });
   $("loadModelBtn").disabled = state.busy;
   $("undoBtn").disabled = !ready || !state.strokes.length;
+  $("redoBtn").disabled = !ready || !state.redo.length;
   let available = 0;
   for (const category of CATEGORIES) {
     const button = $(`part-${category.id}`);
@@ -215,6 +222,8 @@ function clearStrokes() {
   state.strokes.forEach(removeStroke);
   state.strokes = [];
   state.stamps = 0;
+  state.redo = [];
+  state.history = [];
 }
 
 function parseStep(buffer) {
@@ -298,7 +307,7 @@ async function loadModel(readBuffer, name) {
     }
   } finally {
     state.busy = false;
-    controls.enabled = state.mode === "orbit";
+    controls.enabled = state.mode !== "paint";
     $("loading").hidden = true;
     updateUI();
   }
@@ -385,6 +394,26 @@ function applyDrawing(data) {
   state.stamps = restored.reduce((n, stroke) => n + stroke.stamps.length, 0);
   updateUI();
 }
+function restoreStroke(stroke) {
+  return restoreDrawing(
+    {
+      version: 3,
+      modelKey: state.modelKey,
+      strokes: [
+        {
+          color: stroke.color,
+          opacity: stroke.opacity,
+          tool: stroke.tool,
+          soft: stroke.soft,
+          stamps: stroke.stamps,
+        },
+      ],
+    },
+    state.modelKey,
+    state.model.parts,
+    texture,
+  )[0];
+}
 
 function surface(event) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -396,11 +425,43 @@ function surface(event) {
   state.model.root.updateMatrixWorld(true);
   const hit = raycaster.intersectObjects(state.model.parts, false)[0];
   if (!hit) return null;
+  $("paintTarget").textContent = hit.object.name || "当前零件";
   return {
     part: hit.object,
     p: hit.object.worldToLocal(hit.point.clone()),
     n: hit.face.normal.clone().normalize(),
   };
+}
+function updateBrushCursor(event) {
+  const cursor = $("brushCursor");
+  const visible =
+    state.mode === "paint" ||
+    (state.mode === "auto" && event.pointerType === "pen");
+  if (!visible) {
+    cursor.style.display = "none";
+    return;
+  }
+  const rect = renderer.domElement.getBoundingClientRect();
+  cursor.style.display = "block";
+  cursor.style.left = `${event.clientX - rect.left}px`;
+  cursor.style.top = `${event.clientY - rect.top}px`;
+  const pressure = normalizePressure(event, state.pressureEnabled);
+  const pixels = Math.max(
+    12,
+    Math.min(
+      120,
+      12 +
+        Number($("brushSize").value) *
+          0.55 *
+          (state.pressureEnabled ? 0.55 + pressure * 0.75 : 1),
+    ),
+  );
+  cursor.style.width = `${pixels}px`;
+  cursor.style.height = `${pixels}px`;
+  cursor.style.opacity = `${0.45 + pressure * 0.5}`;
+  $("pressureReadout").textContent = state.pressureEnabled
+    ? `压力 ${Math.round(pressure * 100)}%`
+    : "压力关闭";
 }
 function brushSize() {
   return Math.max(
@@ -408,12 +469,34 @@ function brushSize() {
     state.model.radius * 0.0008,
   );
 }
+function screenDistance(part, a, b) {
+  const first = part.localToWorld(a.clone()).project(camera);
+  const second = part.localToWorld(b.clone()).project(camera);
+  return Math.hypot(
+    ((first.x - second.x) * renderer.domElement.clientWidth) / 2,
+    ((first.y - second.y) * renderer.domElement.clientHeight) / 2,
+  );
+}
 function stamp(hit) {
+  const pressure = Number.isFinite(hit.pressure)
+    ? hit.pressure
+    : state.current.pressure;
+  const size =
+    state.current.baseSize *
+    (state.pressureEnabled ? 0.55 + pressure * 0.75 : 1);
+  const opacity = Math.min(
+    1,
+    state.current.baseOpacity *
+      (state.pressureEnabled ? 0.55 + pressure * 0.6 : 1),
+  );
+  if (state.current.tool === "eraser") {
+    eraseAt(hit);
+    return;
+  }
   if (state.stamps >= MAX_STAMPS) {
     status("已达到涂鸦容量，请导出作品后清空，或撤销部分笔画。", true);
     return;
   }
-  const size = state.current.size;
   const mesh = createDecal(
     hit.part,
     hit.p,
@@ -421,6 +504,7 @@ function stamp(hit) {
     state.current.color,
     size,
     texture,
+    { opacity, soft: state.softBrush },
   );
   if (!mesh) return;
   state.current.meshes.push(mesh);
@@ -429,32 +513,75 @@ function stamp(hit) {
     p: hit.p.toArray(),
     n: hit.n.toArray(),
     s: size,
+    opacity,
+    tool: state.current.tool,
+    soft: state.softBrush,
+    pressure,
   });
   state.stamps++;
 }
-renderer.domElement.addEventListener("pointerdown", (event) => {
-  if (state.mode === "auto") controls.enabled = event.pointerType !== "pen" && !state.busy;
-  const inputMode = classifyPointerInput(event, state.mode);
-  if (inputMode !== "paint" || !state.model || state.busy || state.current)
-    return;
-  if (state.moving) updateExplosion(state.model, 1, true);
-  const hit = surface(event);
-  if (!hit) return;
-  event.preventDefault();
-  renderer.domElement.setPointerCapture(event.pointerId);
-  state.pointerId = event.pointerId;
-  state.inputMode = inputMode;
-  controls.enabled = false;
-  state.current = {
-    color: $("brushColor").value,
-    size: brushSize(),
-    meshes: [],
-    stamps: [],
-  };
-  state.last = hit;
-  stamp(hit);
-}, true);
+function eraseAt(hit) {
+  const worldPoint = hit.part.localToWorld(hit.p.clone());
+  const threshold = state.current.baseSize * 1.4;
+  for (let i = state.strokes.length - 1; i >= 0; i--) {
+    const stroke = state.strokes[i];
+    if (!stroke.meshes.some((mesh) => mesh.parent === hit.part)) continue;
+    const close = stroke.meshes.some((mesh) => {
+      const center = new THREE.Box3()
+        .setFromObject(mesh)
+        .getCenter(new THREE.Vector3());
+      return center.distanceTo(worldPoint) <= threshold;
+    });
+    if (!close) continue;
+    state.strokes.splice(i, 1);
+    state.history.push({ type: "erase", stroke });
+    state.redo = [];
+    state.stamps -= stroke.stamps.length;
+    removeStroke(stroke);
+    saveDrawing();
+    status("已擦除一笔涂鸦");
+    break;
+  }
+}
+renderer.domElement.addEventListener(
+  "pointerdown",
+  (event) => {
+    if (state.mode === "auto")
+      controls.enabled = event.pointerType !== "pen" && !state.busy;
+    const inputMode = classifyPointerInput(event, state.mode);
+    if (inputMode !== "paint" || !state.model || state.busy || state.current)
+      return;
+    if (state.moving) updateExplosion(state.model, 1, true);
+    const hit = surface(event);
+    if (!hit) return;
+    event.preventDefault();
+    renderer.domElement.setPointerCapture(event.pointerId);
+    state.pointerId = event.pointerId;
+    state.inputMode = inputMode;
+    controls.enabled = false;
+    state.current = {
+      color: $("brushColor").value,
+      baseSize: brushSize(),
+      baseOpacity: Number($("brushOpacity").value) / 100,
+      tool: state.tool,
+      pressure: normalizePressure(event, state.pressureEnabled),
+      meshes: [],
+      stamps: [],
+    };
+    state.last = hit;
+    stamp({ ...hit, pressure: state.current.pressure });
+  },
+  true,
+);
 renderer.domElement.addEventListener("pointermove", (event) => {
+  updateBrushCursor(event);
+  if (!state.current || event.pointerId !== state.pointerId) return;
+  for (const sample of coalescedPointerEvents(event)) paintSample(sample);
+});
+renderer.domElement.addEventListener("pointerleave", () => {
+  $("brushCursor").style.display = "none";
+});
+function paintSample(event) {
   if (!state.current || event.pointerId !== state.pointerId) return;
   const hit = surface(event);
   if (!hit) {
@@ -464,10 +591,14 @@ renderer.domElement.addEventListener("pointermove", (event) => {
   const previous = state.last;
   if (previous && previous.part === hit.part && previous.n.dot(hit.n) > 0.5) {
     const distance = previous.p.distanceTo(hit.p);
-    const spacing = state.current.size * 0.25;
-    if (distance < spacing * 0.7) return;
-    if (distance < state.current.size * 8) {
-      const steps = Math.min(32, Math.ceil(distance / spacing));
+    const pixels = screenDistance(hit.part, previous.p, hit.p);
+    const spacing = state.current.baseSize * 0.25;
+    if (distance < spacing * 0.7 && pixels < 2) return;
+    if (distance < state.current.baseSize * 8) {
+      const steps = Math.min(
+        48,
+        Math.max(1, Math.ceil(Math.max(distance / spacing, pixels / 6))),
+      );
       for (let i = 1; i <= steps; i++)
         stamp({
           part: hit.part,
@@ -476,15 +607,22 @@ renderer.domElement.addEventListener("pointermove", (event) => {
             .clone()
             .lerp(hit.n, i / steps)
             .normalize(),
+          pressure: normalizePressure(event, state.pressureEnabled),
         });
     } else stamp(hit);
-  } else stamp(hit);
+  } else
+    stamp({
+      ...hit,
+      pressure: normalizePressure(event, state.pressureEnabled),
+    });
   state.last = hit;
-});
+}
 function endStroke() {
   if (!state.current) return;
   if (state.current.stamps.length) {
     state.strokes.push(state.current);
+    state.history.push({ type: "add", stroke: state.current });
+    state.redo = [];
     saveDrawing();
     if (state.stamps < MAX_STAMPS)
       status(`已记录 ${state.strokes.length} 笔涂鸦`);
@@ -535,15 +673,64 @@ $("modePaint").onclick = () => setMode("paint");
 $("brushSize").oninput = () => {
   $("brushSizeValue").value = $("brushSize").value;
 };
+$("brushOpacity").oninput = () => {
+  $("brushOpacityValue").value = `${$("brushOpacity").value}%`;
+};
+$("pressureToggle").onchange = () => {
+  state.pressureEnabled = $("pressureToggle").checked;
+};
+$("toolBrush").onclick = () => {
+  state.tool = "brush";
+  $("toolBrush").classList.add("active");
+  $("toolEraser").classList.remove("active");
+};
+$("toolEraser").onclick = () => {
+  state.tool = "eraser";
+  $("toolEraser").classList.add("active");
+  $("toolBrush").classList.remove("active");
+};
+$("hardBrush").onclick = () => {
+  state.softBrush = !state.softBrush;
+  $("hardBrush").classList.toggle("active", !state.softBrush);
+  $("hardBrush").textContent = state.softBrush ? "硬边" : "柔边";
+};
 $("undoBtn").onclick = () => {
   endStroke();
-  const stroke = state.strokes.pop();
-  if (!stroke) return;
-  state.stamps -= stroke.stamps.length;
-  removeStroke(stroke);
+  const action = state.history.pop();
+  if (!action) return;
+  if (action.type === "add") {
+    const index = state.strokes.indexOf(action.stroke);
+    if (index >= 0) state.strokes.splice(index, 1);
+    state.stamps -= action.stroke.stamps.length;
+    removeStroke(action.stroke);
+  } else {
+    action.stroke = restoreStroke(action.stroke);
+    state.strokes.push(action.stroke);
+    state.stamps += action.stroke.stamps.length;
+  }
+  state.redo.push(action);
   saveDrawing();
   updateUI();
   status("已撤销上一笔");
+};
+$("redoBtn").onclick = () => {
+  endStroke();
+  const action = state.redo.pop();
+  if (!action) return;
+  if (action.type === "add") {
+    action.stroke = restoreStroke(action.stroke);
+    state.strokes.push(action.stroke);
+    state.stamps += action.stroke.stamps.length;
+  } else {
+    const index = state.strokes.indexOf(action.stroke);
+    if (index >= 0) state.strokes.splice(index, 1);
+    state.stamps -= action.stroke.stamps.length;
+    removeStroke(action.stroke);
+  }
+  state.history.push(action);
+  saveDrawing();
+  updateUI();
+  status("已重做上一笔");
 };
 $("resetBtn").onclick = () => {
   endStroke();

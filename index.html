@@ -39,6 +39,10 @@
           <p id="errorText"></p>
           <button id="retryBtn" type="button">重新加载</button>
         </div>
+        <div id="brushCursor" aria-hidden="true">
+          <span id="pressureReadout">压力 65%</span>
+        </div>
+        <div id="paintTarget" aria-live="polite">未选择零件</div>
         <div id="hint">左键旋转 · 右键平移 · 滚轮缩放</div>
       </section>
       <aside id="panel" aria-label="模型工具">
@@ -87,12 +91,7 @@
               disabled
             >
               自动</button
-            ><button
-              id="modeOrbit"
-              aria-pressed="false"
-              data-ready
-              disabled
-            >
+            ><button id="modeOrbit" aria-pressed="false" data-ready disabled>
               旋转查看</button
             ><button id="modePaint" aria-pressed="false" data-ready disabled>
               画笔
@@ -118,15 +117,60 @@
               disabled
             /><output id="brushSizeValue" for="brushSize">22</output>
           </div>
+          <div class="brush-controls brush-secondary">
+            <label for="brushOpacity">不透明度</label
+            ><input
+              id="brushOpacity"
+              type="range"
+              min="5"
+              max="100"
+              value="85"
+              data-ready
+              disabled
+            /><output id="brushOpacityValue" for="brushOpacity">85%</output>
+            ><label class="check-control"
+              ><input
+                id="pressureToggle"
+                type="checkbox"
+                checked
+                data-ready
+                disabled
+              />
+              压力</label
+            >
+          </div>
+          <div class="tool-switch" role="group" aria-label="画笔工具">
+            <button
+              id="toolBrush"
+              class="active"
+              type="button"
+              data-ready
+              disabled
+            >
+              画笔
+            </button>
+            <button id="toolEraser" type="button" data-ready disabled>
+              橡皮
+            </button>
+            <button id="hardBrush" type="button" data-ready disabled>
+              硬边
+            </button>
+          </div>
           <div class="button-row">
             <button id="undoBtn" disabled>撤销上一笔</button
-            ><button id="resetBtn" data-ready disabled>清空涂鸦</button>
+            ><button id="redoBtn" disabled>重做</button>
+          </div>
+          <div class="button-row">
+            <button id="resetBtn" data-ready disabled>清空涂鸦</button>
           </div>
           <div class="button-row file-actions">
             <button id="saveBtn" data-ready disabled>导出涂鸦</button
             ><button id="openBtn" data-ready disabled>导入涂鸦</button>
           </div>
-          <p class="note">自动模式：Apple Pencil 画笔，手指旋转缩放。涂鸦跟随部件移动，并在本机自动保存。</p>
+          <p class="note">
+            自动模式：Apple Pencil
+            画笔，手指旋转缩放。涂鸦跟随部件移动，并在本机自动保存。
+          </p>
         </section>
       </aside>
     </main>
