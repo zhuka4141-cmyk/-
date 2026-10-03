@@ -18,6 +18,7 @@ import {
   serializeDrawing,
   restoreDrawing,
 } from "./paint.js";
+import { classifyPointerInput } from "./interaction.js";
 
 const $ = (id) => document.getElementById(id);
 const viewer = $("viewer");
@@ -25,7 +26,7 @@ const state = {
   model: null,
   modelKey: "",
   modelName: MODEL_FILENAME,
-  mode: "orbit",
+  mode: "auto",
   selected: new Set(),
   strokes: [],
   current: null,
@@ -192,8 +193,9 @@ function fitView() {
 function setMode(mode) {
   endStroke();
   state.mode = mode;
-  controls.enabled = mode === "orbit" && !state.busy;
+  controls.enabled = mode !== "paint" && !state.busy;
   for (const [id, value] of [
+    ["modeAuto", "auto"],
     ["modeOrbit", "orbit"],
     ["modePaint", "paint"],
   ]) {
@@ -204,7 +206,9 @@ function setMode(mode) {
   $("hint").textContent =
     mode === "paint"
       ? "在部件表面拖动绘画 · 涂鸦随部件移动"
-      : "左键旋转 · 右键平移 · 滚轮缩放";
+      : mode === "auto"
+        ? "Apple Pencil 画笔 · 手指旋转/缩放"
+        : "左键旋转 · 右键平移 · 滚轮缩放";
 }
 
 function clearStrokes() {
@@ -273,7 +277,7 @@ async function loadModel(readBuffer, name) {
     $("modelName").textContent = name;
     $("modelInfo").textContent =
       `${model.parts.length} 个实体 · ${model.parts.reduce((n, part) => n + part.geometry.index.count / 3, 0).toLocaleString()} 个三角面`;
-    setMode("orbit");
+    setMode("auto");
     status("车型已加载，选择部件即可拆开");
     const saved = await readSaved(hash);
     if (saved) {
@@ -429,13 +433,9 @@ function stamp(hit) {
   state.stamps++;
 }
 renderer.domElement.addEventListener("pointerdown", (event) => {
-  if (
-    state.mode !== "paint" ||
-    !state.model ||
-    state.busy ||
-    state.current ||
-    (event.pointerType === "mouse" && event.button !== 0)
-  )
+  if (state.mode === "auto") controls.enabled = event.pointerType !== "pen" && !state.busy;
+  const inputMode = classifyPointerInput(event, state.mode);
+  if (inputMode !== "paint" || !state.model || state.busy || state.current)
     return;
   if (state.moving) updateExplosion(state.model, 1, true);
   const hit = surface(event);
@@ -443,6 +443,8 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   renderer.domElement.setPointerCapture(event.pointerId);
   state.pointerId = event.pointerId;
+  state.inputMode = inputMode;
+  controls.enabled = false;
   state.current = {
     color: $("brushColor").value,
     size: brushSize(),
@@ -451,7 +453,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
   };
   state.last = hit;
   stamp(hit);
-});
+}, true);
 renderer.domElement.addEventListener("pointermove", (event) => {
   if (!state.current || event.pointerId !== state.pointerId) return;
   const hit = surface(event);
@@ -495,6 +497,8 @@ function endStroke() {
   )
     renderer.domElement.releasePointerCapture(state.pointerId);
   state.pointerId = null;
+  state.inputMode = null;
+  controls.enabled = state.mode !== "paint" && !state.busy;
   updateUI();
 }
 for (const event of ["pointerup", "pointercancel", "lostpointercapture"])
@@ -525,6 +529,7 @@ $("explodeDistance").oninput = () => {
   changeExplosion();
 };
 $("fitBtn").onclick = fitView;
+$("modeAuto").onclick = () => setMode("auto");
 $("modeOrbit").onclick = () => setMode("orbit");
 $("modePaint").onclick = () => setMode("paint");
 $("brushSize").oninput = () => {
@@ -620,6 +625,6 @@ window.addEventListener("beforeunload", () => {
     /* Earlier IndexedDB writes remain available. */
   }
 });
-setMode("orbit");
+setMode("auto");
 updateUI();
 loadDefault();

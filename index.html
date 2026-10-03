@@ -80,9 +80,16 @@
           <h2 id="paintHeading">表面涂鸦</h2>
           <div class="mode-switch" role="group" aria-label="操作模式">
             <button
-              id="modeOrbit"
+              id="modeAuto"
               class="active"
               aria-pressed="true"
+              data-ready
+              disabled
+            >
+              自动</button
+            ><button
+              id="modeOrbit"
+              aria-pressed="false"
               data-ready
               disabled
             >
@@ -119,7 +126,7 @@
             <button id="saveBtn" data-ready disabled>导出涂鸦</button
             ><button id="openBtn" data-ready disabled>导入涂鸦</button>
           </div>
-          <p class="note">涂鸦跟随部件移动，并在本机自动保存。</p>
+          <p class="note">自动模式：Apple Pencil 画笔，手指旋转缩放。涂鸦跟随部件移动，并在本机自动保存。</p>
         </section>
       </aside>
     </main>
