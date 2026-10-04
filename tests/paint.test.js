@@ -41,6 +41,32 @@ test("a mark made on a separated part stays attached after assembly", () => {
   );
 });
 
+test("a decal near a hard edge stays on the hit face", () => {
+  const part = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshStandardMaterial(),
+  );
+  part.userData.id = "part-0";
+  const decal = createDecal(
+    part,
+    new THREE.Vector3(0.92, 0, 1),
+    new THREE.Vector3(0, 0, 1),
+    "#ffcc00",
+    0.7,
+    null,
+    { soft: false },
+  );
+  assert.ok(decal);
+  const normals = decal.geometry.attributes.normal;
+  let lowestFaceAlignment = 1;
+  for (let i = 0; i < normals.count; i++)
+    lowestFaceAlignment = Math.min(lowestFaceAlignment, normals.getZ(i));
+  assert.ok(lowestFaceAlignment > 0.5);
+  decal.removeFromParent();
+  decal.geometry.dispose();
+  decal.material.dispose();
+});
+
 test("drawing import rejects cross-model, invalid part and non-finite coordinates before applying changes", () => {
   const parts = [{ userData: { id: "part-0" } }];
   const good = {

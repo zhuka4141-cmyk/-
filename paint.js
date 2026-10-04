@@ -63,7 +63,7 @@ function indexPart(part) {
   return { cells, large, cellSize };
 }
 
-function nearbyGeometry(part, point, size) {
+function nearbyGeometry(part, point, size, normal) {
   const index = (part.userData.paintIndex ||= indexPart(part));
   const { cells, large, cellSize } = index;
   const extent = size * 0.9;
@@ -85,7 +85,24 @@ function nearbyGeometry(part, point, size) {
   }
   const positions = [];
   const normals = [];
-  for (const triangle of candidates)
+  const sourceNormals = source.attributes.normal;
+  const targetNormal = normal?.clone().normalize();
+  const triangleNormal = new THREE.Vector3();
+  const vertexNormal = new THREE.Vector3();
+  for (const triangle of candidates) {
+    if (targetNormal && sourceNormals) {
+      triangleNormal.set(0, 0, 0);
+      for (let k = 0; k < 3; k++) {
+        const i = source.index.getX(triangle * 3 + k);
+        vertexNormal.fromBufferAttribute(sourceNormals, i);
+        triangleNormal.add(vertexNormal);
+      }
+      if (
+        triangleNormal.lengthSq() > 1e-8 &&
+        triangleNormal.normalize().dot(targetNormal) < 0.55
+      )
+        continue;
+    }
     for (let k = 0; k < 3; k++) {
       const i = source.index.getX(triangle * 3 + k);
       for (const [attribute, target] of [
@@ -95,6 +112,7 @@ function nearbyGeometry(part, point, size) {
         target.push(attribute.getX(i), attribute.getY(i), attribute.getZ(i));
       }
     }
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
@@ -113,7 +131,7 @@ export function createDecal(
   texture,
   options = {},
 ) {
-  const candidates = nearbyGeometry(part, point, diameter);
+  const candidates = nearbyGeometry(part, point, diameter, normal);
   const tempMesh = new THREE.Mesh(candidates, part.material);
   const orientation = new THREE.Euler().setFromQuaternion(
     new THREE.Quaternion().setFromUnitVectors(
@@ -149,7 +167,7 @@ export function createDecal(
     polygonOffset: true,
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     roughness: 0.82,
     metalness: 0,
   });
@@ -239,7 +257,7 @@ export function consolidateStroke(stroke, texture) {
       polygonOffset: true,
       polygonOffsetFactor: -4,
       polygonOffsetUnits: -4,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       roughness: 0.82,
       metalness: 0,
     });
