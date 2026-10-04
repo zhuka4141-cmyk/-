@@ -7,6 +7,7 @@ import {
   serializeDrawing,
   restoreDrawing,
   removeStroke,
+  consolidateStroke,
 } from "../paint.js";
 
 test("a mark made on a separated part stays attached after assembly", () => {
@@ -148,4 +149,48 @@ test("drawing import rejects invalid pressure and opacity metadata", () => {
     },
   ];
   assert.throws(() => validateDrawing(data, "m", parts), /元数据/);
+});
+
+test("a stroke is consolidated into lit meshes with per-vertex opacity", () => {
+  const part = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshStandardMaterial(),
+  );
+  part.userData.id = "part-0";
+  const first = createDecal(
+    part,
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 0, 1),
+    "#ffcc00",
+    0.4,
+    null,
+    { opacity: 0.3, soft: false },
+  );
+  const second = createDecal(
+    part,
+    new THREE.Vector3(0.5, 0, 1),
+    new THREE.Vector3(0, 0, 1),
+    "#ffcc00",
+    0.4,
+    null,
+    { opacity: 0.9, soft: false },
+  );
+  const stroke = {
+    color: "#ffcc00",
+    soft: false,
+    meshes: [first, second],
+    stamps: [
+      { part: "part-0", p: [0, 0, 1], n: [0, 0, 1], s: 0.4, opacity: 0.3 },
+      { part: "part-0", p: [0.5, 0, 1], n: [0, 0, 1], s: 0.4, opacity: 0.9 },
+    ],
+  };
+  consolidateStroke(stroke, null);
+  assert.equal(stroke.meshes.length, 1);
+  assert.equal(stroke.meshes[0].material.type, "MeshStandardMaterial");
+  assert.equal(stroke.meshes[0].material.vertexColors, true);
+  assert.equal(stroke.meshes[0].geometry.attributes.color.itemSize, 4);
+  const alpha = stroke.meshes[0].geometry.attributes.color.array;
+  assert.ok(Math.min(...alpha.filter((_, index) => index % 4 === 3)) < 0.5);
+  assert.ok(Math.max(...alpha.filter((_, index) => index % 4 === 3)) > 0.8);
+  removeStroke(stroke);
 });

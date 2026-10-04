@@ -140,7 +140,7 @@ export function createDecal(
   const opacity = Number.isFinite(options.opacity)
     ? Math.min(1, Math.max(0.05, options.opacity))
     : 1;
-  const material = new THREE.MeshBasicMaterial({
+  const material = new THREE.MeshStandardMaterial({
     color,
     map: soft ? texture : null,
     transparent: soft || opacity < 1,
@@ -150,12 +150,113 @@ export function createDecal(
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
     side: THREE.DoubleSide,
-    toneMapped: false,
+    roughness: 0.82,
+    metalness: 0,
   });
   const decal = new THREE.Mesh(geometry, material);
   decal.renderOrder = 20;
   part.add(decal);
   return decal;
+}
+
+function mergeAttribute(geometries, name, itemSize) {
+  const values = [];
+  for (const geometry of geometries) {
+    const attribute = geometry.attributes[name];
+    if (!attribute) continue;
+    for (let i = 0; i < attribute.count * itemSize; i++)
+      values.push(attribute.array[i]);
+  }
+  return values.length ? new Float32Array(values) : null;
+}
+
+// A stroke can contain thousands of small decals. Keep its surface detail,
+// but submit one lit mesh per touched part instead of one draw call per stamp.
+export function consolidateStroke(stroke, texture) {
+  if (!stroke?.meshes?.length) return stroke;
+  const groups = new Map();
+  for (const mesh of stroke.meshes) {
+    if (!mesh.parent) continue;
+    if (!groups.has(mesh.parent)) groups.set(mesh.parent, []);
+    groups.get(mesh.parent).push(mesh);
+  }
+  const pointsByPart = new Map();
+  for (const stamp of stroke.stamps || []) {
+    if (!pointsByPart.has(stamp.part)) pointsByPart.set(stamp.part, []);
+    pointsByPart.get(stamp.part).push(stamp.p);
+  }
+  const mergedMeshes = [];
+  for (const [parent, meshes] of groups) {
+    const geometries = meshes.map((mesh) =>
+      mesh.geometry.index
+        ? mesh.geometry.toNonIndexed()
+        : new THREE.BufferGeometry().copy(mesh.geometry),
+    );
+    const position = mergeAttribute(geometries, "position", 3);
+    if (!position) {
+      geometries.forEach((geometry) => geometry.dispose());
+      continue;
+    }
+    const normal = mergeAttribute(geometries, "normal", 3);
+    const uv = mergeAttribute(geometries, "uv", 2);
+    const color = new Float32Array((position.length / 3) * 4);
+    const paintColor = new THREE.Color(stroke.color);
+    const strokeOpacity = Number.isFinite(stroke.opacity)
+      ? Math.min(1, Math.max(0.05, stroke.opacity))
+      : 1;
+    const materialOpacity = Math.max(
+      strokeOpacity,
+      ...meshes.map((mesh) =>
+        Number.isFinite(mesh.material.opacity) ? mesh.material.opacity : 1,
+      ),
+    );
+    let vertex = 0;
+    for (const [index, mesh] of meshes.entries()) {
+      const count = geometries[index].attributes.position.count;
+      const opacity = Number.isFinite(mesh.material.opacity)
+        ? mesh.material.opacity
+        : 1;
+      for (let i = 0; i < count; i++) {
+        color[vertex * 4] = paintColor.r;
+        color[vertex * 4 + 1] = paintColor.g;
+        color[vertex * 4 + 2] = paintColor.b;
+        color[vertex * 4 + 3] = Math.min(1, opacity / materialOpacity);
+        vertex++;
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
+    if (normal) geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normal, 3));
+    if (uv) geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(color, 4));
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: stroke.soft !== false ? texture : null,
+      vertexColors: true,
+      transparent: true,
+      opacity: materialOpacity,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+      side: THREE.DoubleSide,
+      roughness: 0.82,
+      metalness: 0,
+    });
+    const merged = new THREE.Mesh(geometry, material);
+    merged.renderOrder = 20;
+    merged.userData.paintPoints = pointsByPart.get(parent.userData.id) || [];
+    for (const mesh of meshes) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    parent.add(merged);
+    mergedMeshes.push(merged);
+    geometries.forEach((geometry) => geometry.dispose());
+  }
+  stroke.meshes = mergedMeshes;
+  return stroke;
 }
 
 export function removeStroke(stroke) {
@@ -271,6 +372,7 @@ export function restoreDrawing(data, modelKey, parts, texture) {
           stroke.stamps.push(stamp);
         }
       }
+      consolidateStroke(stroke, texture);
     }
     return strokes;
   } catch (error) {

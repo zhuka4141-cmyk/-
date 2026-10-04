@@ -14,6 +14,7 @@ import {
   MAX_STAMPS,
   createBrushTexture,
   createDecal,
+  consolidateStroke,
   removeStroke,
   serializeDrawing,
   restoreDrawing,
@@ -44,10 +45,10 @@ const state = {
   drawingReady: false,
 };
 const renderer = new THREE.WebGLRenderer({
-  antialias: true,
+  antialias: !(matchMedia("(pointer: coarse)").matches || navigator.hardwareConcurrency <= 4),
   powerPreference: "high-performance",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
@@ -527,10 +528,17 @@ function eraseAt(hit) {
     const stroke = state.strokes[i];
     if (!stroke.meshes.some((mesh) => mesh.parent === hit.part)) continue;
     const close = stroke.meshes.some((mesh) => {
-      const center = new THREE.Box3()
-        .setFromObject(mesh)
-        .getCenter(new THREE.Vector3());
-      return center.distanceTo(worldPoint) <= threshold;
+      const points = mesh.userData.paintPoints || [];
+      return points.length
+        ? points.some((point) =>
+            hit.part
+              .localToWorld(new THREE.Vector3().fromArray(point))
+              .distanceTo(worldPoint) <= threshold,
+          )
+        : new THREE.Box3()
+            .setFromObject(mesh)
+            .getCenter(new THREE.Vector3())
+            .distanceTo(worldPoint) <= threshold;
     });
     if (!close) continue;
     state.strokes.splice(i, 1);
@@ -561,6 +569,7 @@ renderer.domElement.addEventListener(
     controls.enabled = false;
     state.current = {
       color: $("brushColor").value,
+      opacity: Number($("brushOpacity").value) / 100,
       baseSize: brushSize(),
       baseOpacity: Number($("brushOpacity").value) / 100,
       tool: state.tool,
@@ -620,6 +629,7 @@ function paintSample(event) {
 function endStroke() {
   if (!state.current) return;
   if (state.current.stamps.length) {
+    consolidateStroke(state.current, texture);
     state.strokes.push(state.current);
     state.history.push({ type: "add", stroke: state.current });
     state.redo = [];
@@ -679,6 +689,32 @@ $("brushOpacity").oninput = () => {
 $("pressureToggle").onchange = () => {
   state.pressureEnabled = $("pressureToggle").checked;
 };
+function setBrushColor(value) {
+  const normalized = String(value).trim().toUpperCase();
+  if (!/^#[0-9A-F]{6}$/.test(normalized)) return false;
+  $("brushColor").value = normalized;
+  $("colorHex").value = normalized;
+  document.querySelectorAll(".color-swatch").forEach((swatch) => {
+    const active = swatch.dataset.color.toUpperCase() === normalized;
+    swatch.classList.toggle("active", active);
+    swatch.setAttribute("aria-selected", String(active));
+  });
+  return true;
+}
+document.querySelectorAll(".color-swatch").forEach((swatch) => {
+  swatch.addEventListener("click", () => setBrushColor(swatch.dataset.color));
+});
+$("brushColor").addEventListener("input", (event) =>
+  setBrushColor(event.target.value),
+);
+$("colorHex").addEventListener("input", (event) => {
+  if (/^#[0-9A-F]{6}$/i.test(event.target.value.trim()))
+    setBrushColor(event.target.value);
+});
+$("colorHex").addEventListener("blur", () =>
+  setBrushColor($("brushColor").value),
+);
+setBrushColor($("brushColor").value);
 $("toolBrush").onclick = () => {
   state.tool = "brush";
   $("toolBrush").classList.add("active");

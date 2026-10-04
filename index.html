@@ -97,16 +97,47 @@
               画笔
             </button>
           </div>
+          <div class="color-control">
+            <div class="control-heading">
+              <span>颜色</span>
+              <input
+                id="colorHex"
+                type="text"
+                value="#F7C948"
+                maxlength="7"
+                inputmode="text"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="十六进制颜色"
+                data-ready
+                disabled
+              />
+            </div>
+            <div class="color-swatches" role="listbox" aria-label="快速选色">
+              <button class="color-swatch active" type="button" data-color="#F7C948" aria-label="黄色" aria-selected="true" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#F26A4F" aria-label="珊瑚红" aria-selected="false" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#E85D75" aria-label="玫红" aria-selected="false" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#A9D18E" aria-label="鼠尾草绿" aria-selected="false" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#57B6C9" aria-label="青色" aria-selected="false" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#5271FF" aria-label="蓝色" aria-selected="false" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#9B6CFF" aria-label="紫色" aria-selected="false" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#F1F3F5" aria-label="白色" aria-selected="false" data-ready disabled></button>
+              <button class="color-swatch" type="button" data-color="#202A33" aria-label="深灰色" aria-selected="false" data-ready disabled></button>
+            </div>
+            <div class="custom-color">
+              <label for="brushColor">自定义</label
+              ><input
+                id="brushColor"
+                type="color"
+                value="#F7C948"
+                aria-label="自定义画笔颜色"
+                data-ready
+                disabled
+              />
+            </div>
+          </div>
           <div class="brush-controls">
-            <label for="brushColor">颜色</label
-            ><input
-              id="brushColor"
-              type="color"
-              value="#ffcc00"
-              aria-label="画笔颜色"
-              data-ready
-              disabled
-            /><label for="brushSize">大小</label
+            <label for="brushSize">大小</label
             ><input
               id="brushSize"
               type="range"
@@ -127,7 +158,7 @@
               value="85"
               data-ready
               disabled
-            /><output id="brushOpacityValue" for="brushOpacity">85%</output>
+            /><output id="brushOpacityValue" for="brushOpacity">85%</output
             ><label class="check-control"
               ><input
                 id="pressureToggle"
