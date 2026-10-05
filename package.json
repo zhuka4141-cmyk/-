@@ -1,0 +1,13 @@
+{
+  "name": "car-disassembly-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-isolation=none tests/*.test.js",
+    "vendor": "node scripts/vendor.mjs"
+  },
+  "devDependencies": {
+    "three": "0.160.0",
+    "occt-import-js": "0.0.23"
+  }
+}
