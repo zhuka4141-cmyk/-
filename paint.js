@@ -1,8 +1,6 @@
 import * as THREE from "three";
 import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
 
-export const MAX_STAMPS = 6000;
-
 export function createBrushTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 128;
@@ -306,10 +304,9 @@ export function validateDrawing(data, modelKey, parts) {
     throw new Error("涂鸦版本不兼容，请使用本版本导出的文件。");
   if (data.modelKey !== modelKey)
     throw new Error("涂鸦属于其他车型，无法应用到当前模型。");
-  if (!Array.isArray(data.strokes) || data.strokes.length > MAX_STAMPS)
+  if (!Array.isArray(data.strokes))
     throw new Error("涂鸦笔画数据不正确。");
   const ids = new Set(parts.map((p) => p.userData.id));
-  let total = 0;
   const vector = (value) =>
     Array.isArray(value) &&
     value.length === 3 &&
@@ -327,9 +324,6 @@ export function validateDrawing(data, modelKey, parts) {
       typeof (stroke.soft ?? true) !== "boolean"
     )
       throw new Error("涂鸦颜色或笔画格式不正确。");
-    total += stroke.stamps.length;
-    if (total > MAX_STAMPS)
-      throw new Error(`涂鸦超过 ${MAX_STAMPS} 个笔刷印记，请分批绘制。`);
     for (const stamp of stroke.stamps) {
       if (!stamp || !ids.has(stamp.part))
         throw new Error("涂鸦引用了不存在的零件。");

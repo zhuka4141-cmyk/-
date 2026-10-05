@@ -91,6 +91,39 @@ test("drawing import rejects cross-model, invalid part and non-finite coordinate
   assert.throws(() => validateDrawing(legacy, "car-sha", parts), /版本/);
 });
 
+test("drawing import accepts more than 6000 brush stamps", () => {
+  const parts = [{ userData: { id: "part-0" } }];
+  const data = {
+    version: 3,
+    modelKey: "m",
+    strokes: [
+      {
+        color: "#fff000",
+        stamps: Array.from({ length: 6001 }, (_, index) => ({
+          part: "part-0",
+          p: [index, 0, 0],
+          n: [0, 0, 1],
+          s: 1,
+        })),
+      },
+    ],
+  };
+  assert.doesNotThrow(() => validateDrawing(data, "m", parts));
+});
+
+test("drawing import accepts more than 6000 strokes", () => {
+  const parts = [{ userData: { id: "part-0" } }];
+  const data = {
+    version: 3,
+    modelKey: "m",
+    strokes: Array.from({ length: 6001 }, () => ({
+      color: "#fff000",
+      stamps: [],
+    })),
+  };
+  assert.doesNotThrow(() => validateDrawing(data, "m", parts));
+});
+
 test("exported drawing restores on its original part, and undo removes only that stroke", () => {
   const part = new THREE.Mesh(
     new THREE.BoxGeometry(2, 2, 2),

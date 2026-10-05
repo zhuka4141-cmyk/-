@@ -11,7 +11,6 @@ import {
   disposeModel,
 } from "./model.js";
 import {
-  MAX_STAMPS,
   createBrushTexture,
   createDecal,
   consolidateStroke,
@@ -494,10 +493,6 @@ function stamp(hit) {
     eraseAt(hit);
     return;
   }
-  if (state.stamps >= MAX_STAMPS) {
-    status("已达到涂鸦容量，请导出作品后清空，或撤销部分笔画。", true);
-    return;
-  }
   const mesh = createDecal(
     hit.part,
     hit.p,
@@ -634,8 +629,7 @@ function endStroke() {
     state.history.push({ type: "add", stroke: state.current });
     state.redo = [];
     saveDrawing();
-    if (state.stamps < MAX_STAMPS)
-      status(`已记录 ${state.strokes.length} 笔涂鸦`);
+    status(`已记录 ${state.strokes.length} 笔涂鸦`);
   } else removeStroke(state.current);
   state.current = null;
   state.last = null;
