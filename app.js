@@ -250,6 +250,7 @@ function parseStep(buffer) {
 async function loadModel(readBuffer, name) {
   if (state.busy) return;
   endStroke();
+  flushDrawing();
   state.busy = true;
   controls.enabled = false;
   $("error").hidden = true;
@@ -344,28 +345,53 @@ async function idb(operation, key, data) {
     };
   });
 }
+const SAVE_DELAY_MS = 400;
 let saveQueue = Promise.resolve();
-function saveDrawing() {
-  if (!state.model) return;
-  state.drawingReady = true;
-  const data = serializeDrawing(state.modelKey, state.modelName, state.strokes);
-  const key = storageKey(state.modelKey);
+let saveTimer = null;
+let pendingSave = null;
+function flushDrawing() {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (!pendingSave) return saveQueue;
+  const pending = pendingSave;
+  pendingSave = null;
+  const data = serializeDrawing(
+    pending.modelKey,
+    pending.modelName,
+    pending.strokes,
+  );
   let localSaved = false;
   try {
-    localStorage.setItem(key, JSON.stringify(data));
+    localStorage.setItem(pending.key, JSON.stringify(data));
     localSaved = true;
   } catch {
     /* IndexedDB provides the larger fallback. */
   }
   saveQueue = saveQueue.then(async () => {
     try {
-      await idb("put", key, data);
+      await idb("put", pending.key, data);
     } catch {
       if (!localSaved) status("自动保存失败，请点击“导出涂鸦”保留作品。", true);
     }
   });
+  return saveQueue;
+}
+function saveDrawing() {
+  if (!state.model) return;
+  state.drawingReady = true;
+  pendingSave = {
+    key: storageKey(state.modelKey),
+    modelKey: state.modelKey,
+    modelName: state.modelName,
+    strokes: state.strokes,
+  };
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushDrawing, SAVE_DELAY_MS);
 }
 async function readSaved(hash) {
+  flushDrawing();
   await saveQueue;
   const saved = [];
   try {
@@ -800,7 +826,6 @@ $("drawingFile").onchange = async () => {
   if (!file || !state.model || state.busy) return;
   endStroke();
   try {
-    if (file.size > 8 * 1024 * 1024) throw new Error("涂鸦文件超过 8 MB。");
     applyDrawing(JSON.parse(await file.text()));
     saveDrawing();
     status("涂鸦已导入");
@@ -831,16 +856,7 @@ $("retryBtn").onclick = loadDefault;
 window.addEventListener("beforeunload", () => {
   endStroke();
   if (!state.model || !state.drawingReady) return;
-  try {
-    localStorage.setItem(
-      storageKey(state.modelKey),
-      JSON.stringify(
-        serializeDrawing(state.modelKey, state.modelName, state.strokes),
-      ),
-    );
-  } catch {
-    /* Earlier IndexedDB writes remain available. */
-  }
+  flushDrawing();
 });
 setMode("auto");
 updateUI();

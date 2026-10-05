@@ -13,7 +13,7 @@
 - Preserve zero CDN deployment and the existing model part hierarchy.
 - Automatic mode maps `pen` to paint and `touch` to orbit.
 - Painting remains attached to part-local coordinates.
-- Maximum 6,000 stamps per model.
+- No application-level stamp count limit; stroke consolidation and delayed persistence keep long sessions responsive.
 
 ## Tasks
 
