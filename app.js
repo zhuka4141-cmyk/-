@@ -39,7 +39,7 @@ const state = {
   moving: false,
   stamps: 0,
   tool: "brush",
-  softBrush: true,
+  softBrush: false,
   pressureEnabled: true,
   drawingReady: false,
 };
@@ -428,6 +428,7 @@ function restoreStroke(stroke) {
       strokes: [
         {
           color: stroke.color,
+          order: stroke.order,
           opacity: stroke.opacity,
           tool: stroke.tool,
           soft: stroke.soft,
@@ -512,8 +513,7 @@ function stamp(hit) {
     (state.pressureEnabled ? 0.55 + pressure * 0.75 : 1);
   const opacity = Math.min(
     1,
-    state.current.baseOpacity *
-      (state.pressureEnabled ? 0.55 + pressure * 0.6 : 1),
+    state.current.baseOpacity,
   );
   if (state.current.tool === "eraser") {
     eraseAt(hit);
@@ -594,6 +594,7 @@ renderer.domElement.addEventListener(
       baseSize: brushSize(),
       baseOpacity: Number($("brushOpacity").value) / 100,
       tool: state.tool,
+      soft: state.softBrush,
       pressure: normalizePressure(event, state.pressureEnabled),
       meshes: [],
       stamps: [],

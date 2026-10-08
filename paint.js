@@ -1,6 +1,33 @@
 import * as THREE from "three";
 import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
 
+let nextPaintOrder = 21;
+
+function paintOrder(order) {
+  if (!Number.isSafeInteger(order) || order < 21) return nextPaintOrder++;
+  nextPaintOrder = Math.max(nextPaintOrder, order + 1);
+  return order;
+}
+
+function configurePaintMaterial(material, soft) {
+  // All paint uses the transparent queue so opaque and soft strokes share order.
+  material.transparent = true;
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = "varying vec2 vPaintUv;\n" + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <uv_vertex>", "#include <uv_vertex>\nvPaintUv = uv;",
+    );
+    shader.fragmentShader = "varying vec2 vPaintUv;\n" + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <alphatest_fragment>",
+      "#include <alphatest_fragment>\n" +
+        (soft ? "" : "if (distance(vPaintUv, vec2(0.5)) > 0.5) discard;\n"),
+    );
+  };
+  material.customProgramCacheKey = () => soft ? "paint-soft" : "paint-solid";
+  return material;
+}
+
 export function createBrushTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 128;
@@ -152,11 +179,19 @@ export function createDecal(
     geometry.dispose();
     return null;
   }
+  // Use a common outward offset so neighboring triangles cannot open seams.
+  const offset = Math.max(part.geometry.boundingSphere.radius * 0.00002, diameter * 0.0002);
+  const direction = normal.clone().normalize().multiplyScalar(offset);
+  const positions = geometry.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    positions.setXYZ(i, positions.getX(i) + direction.x,
+      positions.getY(i) + direction.y, positions.getZ(i) + direction.z);
+  }
   const soft = options.soft !== false;
   const opacity = Number.isFinite(options.opacity)
     ? Math.min(1, Math.max(0.05, options.opacity))
     : 1;
-  const material = new THREE.MeshStandardMaterial({
+  const material = configurePaintMaterial(new THREE.MeshStandardMaterial({
     color,
     map: soft ? texture : null,
     transparent: soft || opacity < 1,
@@ -168,9 +203,9 @@ export function createDecal(
     side: THREE.FrontSide,
     roughness: 0.82,
     metalness: 0,
-  });
+  }), soft);
   const decal = new THREE.Mesh(geometry, material);
-  decal.renderOrder = 20;
+  decal.renderOrder = paintOrder(options.order);
   part.add(decal);
   return decal;
 }
@@ -190,6 +225,9 @@ function mergeAttribute(geometries, name, itemSize) {
 // but submit one lit mesh per touched part instead of one draw call per stamp.
 export function consolidateStroke(stroke, texture) {
   if (!stroke?.meshes?.length) return stroke;
+  stroke.order = stroke.order ?? stroke.meshes.reduce(
+    (order, mesh) => Math.min(order, mesh.renderOrder), Infinity,
+  );
   const groups = new Map();
   for (const mesh of stroke.meshes) {
     if (!mesh.parent) continue;
@@ -245,7 +283,7 @@ export function consolidateStroke(stroke, texture) {
     if (normal) geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normal, 3));
     if (uv) geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(color, 4));
-    const material = new THREE.MeshStandardMaterial({
+    const material = configurePaintMaterial(new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: stroke.soft !== false ? texture : null,
       vertexColors: true,
@@ -258,9 +296,9 @@ export function consolidateStroke(stroke, texture) {
       side: THREE.FrontSide,
       roughness: 0.82,
       metalness: 0,
-    });
+    }), stroke.soft !== false);
     const merged = new THREE.Mesh(geometry, material);
-    merged.renderOrder = 20;
+    merged.renderOrder = stroke.order;
     merged.userData.paintPoints = pointsByPart.get(parent.userData.id) || [];
     for (const mesh of meshes) {
       mesh.removeFromParent();
@@ -291,6 +329,7 @@ export function serializeDrawing(modelKey, modelName, strokes) {
     savedAt: Date.now(),
     strokes: strokes.map((stroke) => ({
       color: stroke.color,
+      order: stroke.order,
       opacity: stroke.opacity ?? 1,
       tool: stroke.tool ?? "brush",
       soft: stroke.soft !== false,
@@ -359,6 +398,7 @@ export function restoreDrawing(data, modelKey, parts, texture) {
     for (const saved of data.strokes) {
       const stroke = {
         color: saved.color,
+        order: Number.isSafeInteger(saved.order) && saved.order >= 21 ? saved.order : undefined,
         opacity: saved.opacity ?? 1,
         tool: saved.tool ?? "brush",
         soft: saved.soft !== false,
@@ -377,6 +417,7 @@ export function restoreDrawing(data, modelKey, parts, texture) {
           {
             opacity: stamp.opacity ?? stroke.opacity,
             soft: stamp.soft ?? stroke.soft,
+            order: stroke.order,
           },
         );
         if (decal) {
