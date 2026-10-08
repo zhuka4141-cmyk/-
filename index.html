@@ -694,7 +694,7 @@
       return triangleSet;
     }
 
-    function buildCandidateGeometry(triangleSet) {
+    function buildCandidateGeometry(triangleSet, brushNormal) {
       const geometry = state.targetMesh.geometry;
       const positionAttr = geometry.attributes.position;
       const normalAttr = geometry.attributes.normal;
@@ -704,8 +704,18 @@
       const positions = [];
       const normals = [];
       const indices = [];
+      const a = new THREE.Vector3();
+      const b = new THREE.Vector3();
+      const c = new THREE.Vector3();
+      const faceNormal = new THREE.Vector3();
 
       triangleSet.forEach(function (triangleIndex) {
+        a.fromBufferAttribute(positionAttr, indexAttr.getX(triangleIndex * 3));
+        b.fromBufferAttribute(positionAttr, indexAttr.getX(triangleIndex * 3 + 1));
+        c.fromBufferAttribute(positionAttr, indexAttr.getX(triangleIndex * 3 + 2));
+        faceNormal.crossVectors(b.sub(a), c.sub(a)).normalize();
+        // Do not project onto the opposite side of a thin panel.
+        if (faceNormal.dot(brushNormal) <= 0.05) return;
         const newIndices = [];
         for (let k = 0; k < 3; k++) {
           const originalIndex = indexAttr.getX(triangleIndex * 3 + k);
@@ -762,7 +772,7 @@
       const triangleSet = queryCandidateTriangles(point, halfExtent);
       if (!triangleSet || triangleSet.size === 0) return null;
 
-      const candidateGeometry = buildCandidateGeometry(triangleSet);
+      const candidateGeometry = buildCandidateGeometry(triangleSet, normal);
       if (!candidateGeometry) return null;
 
       const tempMesh = new THREE.Mesh(candidateGeometry, state.targetMesh.material);
@@ -782,6 +792,21 @@
         return null;
       }
 
+      // Polygon offset alone cannot reliably separate coplanar CAD surfaces.
+      // Move paint slightly out of the surface while preserving depth testing.
+      const decalPositions = decalGeometry.attributes.position;
+      const decalNormals = decalGeometry.attributes.normal;
+      const surfaceOffset = Math.max(state.modelRadius * 0.00001, diameter * 0.0001);
+      const offsetNormal = new THREE.Vector3();
+      for (let i = 0; i < decalPositions.count; i++) {
+        offsetNormal.fromBufferAttribute(decalNormals, i).normalize();
+        decalPositions.setXYZ(i,
+          decalPositions.getX(i) + offsetNormal.x * surfaceOffset,
+          decalPositions.getY(i) + offsetNormal.y * surfaceOffset,
+          decalPositions.getZ(i) + offsetNormal.z * surfaceOffset);
+      }
+      decalPositions.needsUpdate = true;
+
       const material = new THREE.MeshBasicMaterial({
         map: state.brushTexture,
         color: colorHex,
@@ -796,7 +821,8 @@
       });
 
       const decalMesh = new THREE.Mesh(decalGeometry, material);
-      decalMesh.renderOrder = 20;
+      // Keep later stamps on top even after the camera rotates.
+      decalMesh.renderOrder = 20 + decalMesh.id;
       decalMesh.userData.isDecal = true;
       scene.add(decalMesh);
       return decalMesh;
